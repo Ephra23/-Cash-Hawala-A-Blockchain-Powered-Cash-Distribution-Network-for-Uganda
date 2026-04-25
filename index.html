@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <meta name="theme-color" content="#0a1628" />
+  <meta name="description" content="Cash Hawala Uganda — Convert USDC to UGX cash without banks" />
+  <title>Cash Hawala</title>
+
+  <!-- PWA manifest inline for portability -->
+  <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiQ2FzaCBIYXdhbGEiLCJzaG9ydF9uYW1lIjoiSGF3YWxhIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzBhMTYyOCIsInRoZW1lX2NvbG9yIjoiIzBhMTYyOCIsInN0YXJ0X3VybCI6Ii8iLCJpY29ucyI6W119" />
+
+  <!-- Ethers.js for wallet interaction (loaded from CDN - ~170KB gzipped) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
+
+  <!-- QR Code lib -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    /* ── Design System ──────────────────────────────────────────── */
+    /* Aesthetic: Utilitarian African fintech — warm ochre + deep navy
+       Typeface: Courier-adjacent for ID numbers, clean sans for body
+       Feel: A physical receipt, a hawala ledger, a trust document */
+
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+    :root {
+      --navy:       #0a1628;
+      --navy-mid:   #0f2040;
+      --navy-light: #1a3358;
+      --ochre:      #c8871a;
+      --ochre-glow: #e6a535;
+      --gold:       #f5c842;
+      --cream:      #f7f0e3;
+      --cream-dim:  #e8dcc8;
+      --green:      #2eb872;
+      --red:        #e04545;
+      --text-main:  #f0e8d8;
+      --text-dim:   #8fa3c0;
+      --border:     rgba(200,135,26,0.25);
+      --card-bg:    rgba(15,32,64,0.85);
+
+      --ff-mono: 'Space Mono', 'Courier New', monospace;
+      --ff-sans: 'DM Sans', system-ui, sans-serif;
+
+      --radius: 8px;
+      --radius-lg: 16px;
+      --shadow: 0 4px 32px rgba(0,0,0,0.4);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--navy);
+      color: var(--text-main);
+      font-family: var(--ff-sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior: none;
+    }
+
+    /* ── Background texture ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(200,135,26,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(46,184,114,0.05) 0%, transparent 60%),
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 39px,
+          rgba(255,255,255,0.015) 39px,
+          rgba(255,255,255,0.015) 40px
+        );
+      pointer-events: none; z-index: 0;
+    }
+
+    #app { position: relative; z-index: 1; min-height: 100vh; }
+
+    /* ── Header ── */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,22,40,0.9);
+      backdrop-filter: blur(12px);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .header-brand {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .header-logo {
+      width: 32px; height: 32px;
+      background: var(--ochre);
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--ff-mono); font-size: 13px; font-weight: 700;
+      color: var(--navy);
+    }
+    .header-name {
+      font-family: var(--ff-mono); font-size: 14px; font-weight: 700;
+      letter-spacing: 0.06em; color: var(--ochre-glow);
+    }
+    .header-sub {
+      font-size: 11px; color: var(--text-dim); letter-spacing: 0.04em;
+    }
+    .wallet-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 14px;
+      background: var(--navy-light);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-dim); font-size: 12px;
+      font-family: var(--ff-mono);
+      cursor: pointer; transition: all 0.2s;
+    }
+    .wallet-btn:hover { border-color: var(--ochre); color: var(--ochre-glow); }
+    .wallet-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.2s;
+    }
+    .wallet-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    /* ── Nav tabs ── */
+    .nav {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,22,40,0.6);
+    }
+    .nav-tab {
+      flex: 1; padding: 12px 8px;
+      text-align: center; font-size: 12px; font-weight: 500;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      color: var(--text-dim); cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .nav-tab.active { color: var(--ochre-glow); border-color: var(--ochre); }
+
+    /* ── Main content ── */
+    .main { padding: 24px 20px; max-width: 480px; margin: 0 auto; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(8px);
+    }
+    .card-title {
+      font-family: var(--ff-mono); font-size: 11px; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--ochre); margin-bottom: 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title::before {
+      content: ''; display: block; width: 20px; height: 1px; background: var(--ochre);
+    }
+
+    /* ── Form elements ── */
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--text-dim); margin-bottom: 6px;
+    }
+    .field input, .field select {
+      width: 100%; padding: 12px 14px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: var(--radius);
+      color: var(--text-main); font-size: 15px;
+      font-family: var(--ff-sans);
+      outline: none; transition: border 0.2s;
+      -webkit-appearance: none;
+    }
+    .field input:focus, .field select:focus {
+      border-color: var(--ochre);
+      background: rgba(200,135,26,0.06);
+    }
+    .field input::placeholder { color: var(--text-dim); }
+    .field-hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+    /* Amount input — large */
+    .amount-wrap { position: relative; }
+    .amount-wrap input {
+      font-family: var(--ff-mono); font-size: 28px; font-weight: 700;
+      padding: 16px 80px 16px 14px; letter-spacing: 0.02em;
+      color: var(--gold);
+    }
+    .amount-currency {
+      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+      font-family: var(--ff-mono); font-size: 13px; color: var(--text-dim);
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      width: 100%; padding: 14px;
+      border: none; border-radius: var(--radius);
+      font-size: 14px; font-weight: 600; font-family: var(--ff-sans);
+      letter-spacing: 0.04em; cursor: pointer;
+      transition: all 0.2s; display: flex; align-items: center;
+      justify-content: center; gap: 8px;
+    }
+    .btn-primary {
+      background: var(--ochre); color: var(--navy);
+    }
+    .btn-primary:hover { background: var(--ochre-glow); transform: translateY(-1px); }
+    .btn-primary:disabled { background: rgba(200,135,26,0.3); color: rgba(10,22,40,0.5); cursor: not-allowed; transform: none; }
+    .btn-ghost {
+      background: transparent; color: var(--text-dim);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .btn-ghost:hover { border-color: var(--ochre); color: var(--ochre); }
+    .btn-danger {
+      background: rgba(224,69,69,0.15); color: var(--red);
+      border: 1px solid rgba(224,69,69,0.3);
+    }
+
+    /* ── Cost breakdown ── */
+    .breakdown {
+      background: rgba(0,0,0,0.2);
+      border-radius: var(--radius);
+      padding: 14px; margin: 16px 0;
+      border: 1px dashed rgba(200,135,26,0.2);
+    }
+    .breakdown-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 0; font-size: 13px;
+    }
+    .breakdown-row span:first-child { color: var(--text-dim); }
+    .breakdown-row.total {
+      border-top: 1px solid var(--border);
+      margin-top: 8px; padding-top: 10px;
+      font-weight: 700; font-family: var(--ff-mono); font-size: 14px;
+    }
+    .breakdown-row.total span:last-child { color: var(--gold); }
+
+    /* ── Agent card ── */
+    .agent-card {
+      display: flex; align-items: center;
+      padding: 12px 14px; border-radius: var(--radius);
+      border: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer; transition: all 0.2s; margin-bottom: 8px;
+      background: rgba(255,255,255,0.02);
+    }
+    .agent-card:hover, .agent-card.selected {
+      border-color: var(--ochre); background: rgba(200,135,26,0.07);
+    }
+    .agent-badge {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--navy-light); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--ff-mono); font-size: 12px; font-weight: 700;
+      color: var(--ochre); flex-shrink: 0; margin-right: 12px;
+    }
+    .agent-info { flex: 1; }
+    .agent-name { font-size: 13px; font-weight: 600; color: var(--text-main); }
+    .agent-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .agent-rep {
+      font-family: var(--ff-mono); font-size: 12px;
+      color: var(--green); font-weight: 700;
+    }
+    .tag {
+      display: inline-block; padding: 2px 7px;
+      border-radius: 4px; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      margin-left: 6px;
+    }
+    .tag-provisional { background: rgba(200,135,26,0.2); color: var(--ochre); }
+    .tag-verified { background: rgba(46,184,114,0.15); color: var(--green); }
+
+    /* ── PIN display ── */
+    .pin-display {
+      display: flex; gap: 8px; justify-content: center;
+      padding: 24px 0;
+    }
+    .pin-digit {
+      width: 44px; height: 56px;
+      background: var(--navy-light);
+      border: 2px solid var(--ochre);
+      border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--ff-mono); font-size: 24px; font-weight: 700;
+      color: var(--gold);
+      box-shadow: 0 0 16px rgba(200,135,26,0.15);
+    }
+
+    /* ── Status banner ── */
+    .status-banner {
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 13px; font-weight: 500;
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 16px;
+    }
+    .status-banner.info { background: rgba(200,135,26,0.1); border: 1px solid rgba(200,135,26,0.3); color: var(--ochre-glow); }
+    .status-banner.success { background: rgba(46,184,114,0.1); border: 1px solid rgba(46,184,114,0.3); color: var(--green); }
+    .status-banner.error { background: rgba(224,69,69,0.1); border: 1px solid rgba(224,69,69,0.3); color: var(--red); }
+
+    /* ── QR wrapper ── */
+    .qr-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 20px;
+      background: var(--cream); border-radius: var(--radius-lg);
+      margin: 16px 0;
+    }
+    #qr-canvas { border-radius: var(--radius); }
+    .qr-label {
+      margin-top: 10px; font-size: 11px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--navy); opacity: 0.6;
+    }
+
+    /* ── Transfer ID ── */
+    .transfer-id {
+      font-family: var(--ff-mono); font-size: 11px; color: var(--text-dim);
+      word-break: break-all; padding: 8px;
+      background: rgba(0,0,0,0.2); border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .transfer-id:hover { color: var(--ochre); }
+
+    /* ── Receipt ── */
+    .receipt {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .receipt-header {
+      background: var(--ochre); padding: 14px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .receipt-header h3 {
+      font-family: var(--ff-mono); font-size: 14px; font-weight: 700;
+      color: var(--navy); letter-spacing: 0.06em;
+    }
+    .receipt-body { padding: 20px; }
+    .receipt-row {
+      display: flex; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px dashed rgba(255,255,255,0.06);
+      font-size: 13px;
+    }
+    .receipt-row:last-child { border-bottom: none; }
+    .receipt-row span:first-child { color: var(--text-dim); }
+    .receipt-row span:last-child { font-family: var(--ff-mono); color: var(--text-main); }
+
+    /* ── Steps indicator ── */
+    .steps {
+      display: flex; align-items: center;
+      padding: 0 0 24px;
+      gap: 0;
+    }
+    .step-item {
+      display: flex; flex-direction: column; align-items: center;
+      flex: 1;
+    }
+    .step-circle {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--ff-mono); font-size: 11px; font-weight: 700;
+      border: 2px solid var(--border);
+      color: var(--text-dim); background: var(--navy);
+      transition: all 0.3s;
+    }
+    .step-circle.done { background: var(--green); border-color: var(--green); color: var(--navy); }
+    .step-circle.active { background: var(--ochre); border-color: var(--ochre); color: var(--navy); }
+    .step-label { font-size: 10px; color: var(--text-dim); margin-top: 4px; text-align: center; }
+    .step-line { height: 2px; flex: 1; background: var(--border); margin-top: -14px; }
+    .step-line.done { background: var(--green); }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: var(--ochre);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+
+    /* ── Pulse animation ── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .pulse { animation: pulse 2s ease-in-out infinite; }
+
+    /* ── Agent dashboard ── */
+    .stat-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 12px; margin-bottom: 16px;
+    }
+    .stat-card {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .stat-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+    .stat-value { font-family: var(--ff-mono); font-size: 22px; font-weight: 700; color: var(--gold); margin-top: 4px; }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px; background: var(--border);
+      margin: 20px 0;
+      position: relative;
+    }
+    .divider-label {
+      position: absolute; left: 50%; top: -10px; transform: translateX(-50%);
+      background: var(--navy-mid); padding: 0 12px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-dim);
+    }
+
+    /* ── PIN entry (agent view) ── */
+    .pin-input-wrap {
+      display: flex; gap: 8px; justify-content: center;
+      margin: 16px 0;
+    }
+    .pin-input-wrap input {
+      width: 44px; height: 56px; text-align: center;
+      font-family: var(--ff-mono); font-size: 22px; font-weight: 700;
+      background: var(--navy-light); border: 2px solid rgba(255,255,255,0.1);
+      border-radius: var(--radius); color: var(--gold);
+      outline: none; transition: border 0.2s;
+    }
+    .pin-input-wrap input:focus { border-color: var(--ochre); }
+
+    /* ── Conflict / legal notice ── */
+    .notice {
+      font-size: 11px; color: var(--text-dim); line-height: 1.7;
+      padding: 12px; background: rgba(0,0,0,0.15);
+      border-left: 3px solid var(--ochre);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin-top: 16px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 2px; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- Header -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-logo">⬡</div>
+      <div>
+        <div class="header-name">CASH HAWALA</div>
+        <div class="header-sub">Uganda · USDC → UGX</div>
+      </div>
+    </div>
+    <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">
+      <div class="wallet-dot" id="walletDot"></div>
+      <span id="walletLabel">Connect</span>
+    </button>
+  </header>
+
+  <!-- Navigation -->
+  <nav class="nav">
+    <div class="nav-tab active" id="tab-send" onclick="showTab('send')">Send</div>
+    <div class="nav-tab" id="tab-receive" onclick="showTab('receive')">Receive</div>
+    <div class="nav-tab" id="tab-agent" onclick="showTab('agent')">Agent</div>
+    <div class="nav-tab" id="tab-history" onclick="showTab('history')">History</div>
+  </nav>
+
+  <!-- Main content -->
+  <main class="main" id="main-content">
+    <!-- Injected by JS -->
+  </main>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+
+const state = {
+  wallet: null,
+  provider: null,
+  signer: null,
+  tab: 'send',
+  sendStep: 1,         // 1=amount, 2=agent select, 3=confirm, 4=success
+  transfer: null,      // active transfer object
+  agents: [],
+  selectedAgent: null,
+  agentPinInput: '',
+  history: JSON.parse(localStorage.getItem('hawala_history') || '[]'),
+};
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+const CONFIG = {
+  API_BASE: 'https://cash-hawala.workers.dev/v1',  // replace with deployed URL
+  POLYGON_CHAIN_ID: 137,
+  POLYGON_RPC: 'https://polygon-rpc.com',
+  USDC_POLYGON: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+  ESCROW_ADDRESS: '0xYOUR_DEPLOYED_ESCROW_ADDRESS',  // post-deploy
+  UGX_PER_USD: 3750,
+  FEE_BPS: 150,
+};
+
+// Minimal USDC ABI
+const USDC_ABI = [
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+];
+
+// Minimal escrow ABI
+const ESCROW_ABI = [
+  'function initiateTransfer(bytes32 transferId, address agentAddr, bytes32 receiverHash, bytes32 pinCommitment, address token, uint256 principalAmount, uint256 amountUGX, bytes32 locationHash) external',
+  'function confirmDelivery(bytes32 transferId, string pin, uint8 proofType, bytes32 proofData) external',
+  'function openDispute(bytes32 transferId) external',
+  'function claimRefund(bytes32 transferId) external',
+];
+
+// ─── Wallet ───────────────────────────────────────────────────────────────────
+
+async function connectWallet() {
+  if (state.wallet) {
+    // Toggle disconnect
+    state.wallet = null; state.provider = null; state.signer = null;
+    document.getElementById('walletLabel').textContent = 'Connect';
+    document.getElementById('walletDot').classList.remove('connected');
+    render();
+    return;
+  }
+
+  try {
+    if (!window.ethereum) {
+      alert('No wallet detected.\n\nInstall MetaMask or Trust Wallet, or use the SMS flow by sharing your transfer link with the receiver.');
+      return;
+    }
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    const signer  = await provider.getSigner();
+    const address = await signer.getAddress();
+
+    // Check / switch to Polygon
+    const network = await provider.getNetwork();
+    if (Number(network.chainId) !== CONFIG.POLYGON_CHAIN_ID) {
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x89' }],
+        });
+      } catch {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x89',
+            chainName: 'Polygon PoS',
+            nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+            rpcUrls: ['https://polygon-rpc.com'],
+            blockExplorerUrls: ['https://polygonscan.com'],
+          }],
+        });
+      }
+    }
+
+    state.wallet   = address;
+    state.provider = provider;
+    state.signer   = signer;
+
+    const short = address.slice(0,6) + '…' + address.slice(-4);
+    document.getElementById('walletLabel').textContent = short;
+    document.getElementById('walletDot').classList.add('connected');
+    render();
+  } catch (e) {
+    console.error(e);
+    showBanner('Connection failed: ' + e.message, 'error');
+  }
+}
+
+// ─── Tab Router ───────────────────────────────────────────────────────────────
+
+function showTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  render();
+}
+
+function render() {
+  const el = document.getElementById('main-content');
+  switch (state.tab) {
+    case 'send':    el.innerHTML = renderSend();    attachSendHandlers();    break;
+    case 'receive': el.innerHTML = renderReceive(); attachReceiveHandlers(); break;
+    case 'agent':   el.innerHTML = renderAgent();   attachAgentHandlers();   break;
+    case 'history': el.innerHTML = renderHistory(); break;
+  }
+}
+
+// ─── Send Flow ────────────────────────────────────────────────────────────────
+
+function renderSend() {
+  const step = state.sendStep;
+  const steps = ['Amount', 'Agent', 'Confirm', 'Done'];
+  const stepsHtml = `
+    <div class="steps">
+      ${steps.map((s, i) => `
+        ${i > 0 ? `<div class="step-line ${i < step ? 'done' : ''}"></div>` : ''}
+        <div class="step-item">
+          <div class="step-circle ${i + 1 < step ? 'done' : i + 1 === step ? 'active' : ''}">
+            ${i + 1 < step ? '✓' : i + 1}
+          </div>
+          <div class="step-label">${s}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  if (step === 1) return stepsHtml + renderSendStep1();
+  if (step === 2) return stepsHtml + renderSendStep2();
+  if (step === 3) return stepsHtml + renderSendStep3();
+  if (step === 4) return stepsHtml + renderSendStep4();
+  return '';
+}
+
+function renderSendStep1() {
+  return `
+    <div class="card">
+      <div class="card-title">Transfer Amount</div>
+
+      <div class="field">
+        <label>Amount to Send</label>
+        <div class="amount-wrap">
+          <input type="number" id="ugxAmount" placeholder="300000" min="1000" step="1000"
+            value="${state.draft?.amountUGX || ''}"
+            oninput="updateCostBreakdown()" />
+          <span class="amount-currency">UGX</span>
+        </div>
+        <div class="field-hint">Min: 1,000 UGX · Max: 1,875,000 UGX per transfer</div>
+      </div>
+
+      <div class="field">
+        <label>Token</label>
+        <select id="tokenSelect">
+          <option value="USDC">USDC (Polygon)</option>
+          <option value="USDT">USDT (Polygon)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Pickup Location</label>
+        <input type="text" id="locationDesc" placeholder="Kampala, Owino Market"
+          value="${state.draft?.locationDescription || ''}" />
+        <div class="field-hint">Agent will meet receiver here</div>
+      </div>
+
+      <div class="field">
+        <label>Receiver Phone (optional)</label>
+        <input type="tel" id="receiverPhone" placeholder="+256 700 000 000"
+          value="${state.draft?.receiverPhone || ''}" />
+        <div class="field-hint">PIN sent via SMS if provided. Otherwise display PIN to receiver yourself.</div>
+      </div>
+
+      <div id="cost-breakdown" class="breakdown" style="display:none">
+        <div class="breakdown-row">
+          <span>Amount (UGX)</span><span id="br-ugx">—</span>
+        </div>
+        <div class="breakdown-row">
+          <span>≈ USDC principal</span><span id="br-usdc">—</span>
+        </div>
+        <div class="breakdown-row">
+          <span>Protocol fee (1.5%)</span><span id="br-fee">—</span>
+        </div>
+        <div class="breakdown-row total">
+          <span>Total USDC</span><span id="br-total">—</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="sendStep1Next()" id="step1-btn" disabled>
+        Find Nearby Agents →
+      </button>
+    </div>
+
+    <div class="notice">
+      <strong>Privacy:</strong> Receiver identity is never stored on-chain. PINs are single-use and expire in 24 hours.
+      Funds are locked in a non-custodial smart contract — no bank or mobile money operator touches them.
+    </div>
+  `;
+}
+
+function updateCostBreakdown() {
+  const ugx = parseInt(document.getElementById('ugxAmount')?.value || '0');
+  const btn = document.getElementById('step1-btn');
+  const breakdown = document.getElementById('cost-breakdown');
+
+  if (!ugx || ugx < 1000) {
+    if (breakdown) breakdown.style.display = 'none';
+    if (btn) btn.disabled = true;
+    return;
+  }
+
+  const usd = ugx / CONFIG.UGX_PER_USD;
+  const fee = usd * CONFIG.FEE_BPS / 10000;
+  const total = usd + fee;
+
+  document.getElementById('br-ugx').textContent = ugx.toLocaleString() + ' UGX';
+  document.getElementById('br-usdc').textContent = usd.toFixed(4) + ' USDC';
+  document.getElementById('br-fee').textContent = fee.toFixed(4) + ' USDC';
+  document.getElementById('br-total').textContent = total.toFixed(4) + ' USDC';
+
+  if (breakdown) breakdown.style.display = 'block';
+  if (btn) btn.disabled = false;
+}
+
+async function sendStep1Next() {
+  const ugx      = parseInt(document.getElementById('ugxAmount').value);
+  const location = document.getElementById('locationDesc').value.trim();
+  const phone    = document.getElementById('receiverPhone').value.trim();
+  const token    = document.getElementById('tokenSelect').value;
+
+  if (!ugx || ugx < 1000) return showBanner('Enter a valid amount', 'error');
+  if (!location) return showBanner('Enter a pickup location', 'error');
+  if (!state.wallet) return showBanner('Connect your wallet first', 'error');
+
+  state.draft = { amountUGX: ugx, locationDescription: location, receiverPhone: phone, token };
+
+  // Fetch nearby agents
+  const btn = document.getElementById('step1-btn');
+  btn.innerHTML = '<span class="spinner"></span> Finding agents…';
+  btn.disabled = true;
+
+  try {
+    // MVP: use hardcoded demo agents until backend is live
+    state.agents = getDemoAgents(ugx);
+    state.sendStep = 2;
+    render();
+  } catch (e) {
+    btn.innerHTML = 'Find Nearby Agents →';
+    btn.disabled = false;
+    showBanner('Failed to load agents: ' + e.message, 'error');
+  }
+}
+
+function getDemoAgents(ugx) {
+  return [
+    {
+      wallet: '0xA1B2C3D4E5F6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      name: 'Grace Nakato',
+      distanceKm: 0.3,
+      reputationScore: 96,
+      maxTransactionUGX: 2000000,
+      dailyLimitRemaining: 1500000,
+      provisional: false,
+      locations: [{ description: 'Owino Market, Stall 24A' }],
+    },
+    {
+      wallet: '0xB2C3D4E5F6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
+      name: 'Moses Ssempa',
+      distanceKm: 1.1,
+      reputationScore: 88,
+      maxTransactionUGX: 500000,
+      dailyLimitRemaining: 400000,
+      provisional: false,
+      locations: [{ description: 'Garden City Mall, Gate 2' }],
+    },
+    {
+      wallet: '0xC3D4E5F6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+      name: 'Esther Akello',
+      distanceKm: 2.4,
+      reputationScore: 81,
+      maxTransactionUGX: 200000,
+      dailyLimitRemaining: 200000,
+      provisional: true,
+      locations: [{ description: 'Kikuubo Trading Centre' }],
+    },
+  ].filter(a => a.dailyLimitRemaining >= ugx);
+}
+
+function renderSendStep2() {
+  const agentCards = state.agents.map((a, i) => `
+    <div class="agent-card ${state.selectedAgent?.wallet === a.wallet ? 'selected' : ''}"
+      onclick="selectAgent(${i})">
+      <div class="agent-badge">${a.name.split(' ').map(w => w[0]).join('')}</div>
+      <div class="agent-info">
+        <div class="agent-name">
+          ${a.name}
+          <span class="tag ${a.provisional ? 'tag-provisional' : 'tag-verified'}">
+            ${a.provisional ? 'Provisional' : 'Verified'}
+          </span>
+        </div>
+        <div class="agent-meta">${a.locations[0].description} · ${a.distanceKm}km away</div>
+        <div class="agent-meta">Daily remaining: UGX ${a.dailyLimitRemaining.toLocaleString()}</div>
+      </div>
+      <div class="agent-rep">${a.reputationScore}%</div>
+    </div>
+  `).join('');
+
+  return `
+    <div class="card">
+      <div class="card-title">Select Agent</div>
+      <div class="status-banner info">
+        📍 Agents within 20km of <strong>${state.draft.locationDescription}</strong>
+      </div>
+      ${agentCards.length ? agentCards : '<div style="color:var(--text-dim);text-align:center;padding:20px">No available agents in this area</div>'}
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-ghost" style="flex:0 0 80px" onclick="state.sendStep=1;render()">← Back</button>
+      <button class="btn btn-primary" onclick="sendStep2Next()" ${!state.selectedAgent ? 'disabled' : ''}>
+        Confirm Agent →
+      </button>
+    </div>
+  `;
+}
+
+function selectAgent(idx) {
+  state.selectedAgent = state.agents[idx];
+  render();
+}
+
+function sendStep2Next() {
+  if (!state.selectedAgent) return;
+  state.sendStep = 3;
+  render();
+}
+
+function renderSendStep3() {
+  const a   = state.selectedAgent;
+  const ugx = state.draft.amountUGX;
+  const usd = ugx / CONFIG.UGX_PER_USD;
+  const fee = usd * CONFIG.FEE_BPS / 10000;
+
+  return `
+    <div class="card">
+      <div class="card-title">Confirm & Lock Funds</div>
+
+      <div class="receipt">
+        <div class="receipt-header">
+          <h3>TRANSFER SUMMARY</h3>
+          <span style="font-size:11px;color:rgba(10,22,40,0.6)">ESCROWED</span>
+        </div>
+        <div class="receipt-body">
+          <div class="receipt-row">
+            <span>Cash Amount</span>
+            <span>UGX ${ugx.toLocaleString()}</span>
+          </div>
+          <div class="receipt-row">
+            <span>Token</span>
+            <span>${state.draft.token} (Polygon)</span>
+          </div>
+          <div class="receipt-row">
+            <span>Principal</span>
+            <span>${usd.toFixed(4)} USDC</span>
+          </div>
+          <div class="receipt-row">
+            <span>Protocol Fee</span>
+            <span>${fee.toFixed(4)} USDC</span>
+          </div>
+          <div class="receipt-row">
+            <span>Agent</span>
+            <span>${a.name}</span>
+          </div>
+          <div class="receipt-row">
+            <span>Location</span>
+            <span>${state.draft.locationDescription}</span>
+          </div>
+          <div class="receipt-row">
+            <span>PIN Expiry</span>
+            <span>24 hours</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-banner info" style="margin-top:16px">
+        🔒 Funds locked in smart contract until agent confirms delivery.
+        You can refund after 48h if unclaimed.
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn btn-ghost" style="flex:0 0 80px" onclick="state.sendStep=2;render()">← Back</button>
+        <button class="btn btn-primary" id="approve-btn" onclick="executeSend()">
+          Approve & Lock USDC
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+async function executeSend() {
+  if (!state.wallet) return showBanner('Connect wallet first', 'error');
+
+  const btn = document.getElementById('approve-btn');
+  btn.innerHTML = '<span class="spinner"></span> Initiating…';
+  btn.disabled = true;
+
+  try {
+    // 1. Call backend to generate transfer ID, PIN, receiver hash, pin commitment
+    const resp = await fetch(`${CONFIG.API_BASE}/transfers/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amountUGX:           state.draft.amountUGX,
+        agentWallet:         state.selectedAgent.wallet,
+        locationDescription: state.draft.locationDescription,
+        receiverPhone:       state.draft.receiverPhone || null,
+        senderWallet:        state.wallet,
+        token:               state.draft.token,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'API error');
+    }
+
+    const data = await resp.json();
+    state.pendingTransfer = data;
+
+    btn.innerHTML = '<span class="spinner"></span> Approving USDC…';
+
+    // 2. Approve USDC on-chain
+    const usdc = new ethers.Contract(CONFIG.USDC_POLYGON, USDC_ABI, state.signer);
+    const totalAmount = data.contractParams.principalAmount;
+    // Add fee: totalToken from backend
+    const fullAmount = data.totalToken;
+
+    const approveTx = await usdc.approve(CONFIG.ESCROW_ADDRESS, fullAmount);
+    await approveTx.wait();
+
+    btn.innerHTML = '<span class="spinner"></span> Locking funds…';
+
+    // 3. Call initiateTransfer on escrow
+    const escrow = new ethers.Contract(CONFIG.ESCROW_ADDRESS, ESCROW_ABI, state.signer);
+    const cp = data.contractParams;
+
+    const tx = await escrow.initiateTransfer(
+      cp.transferId,
+      cp.agentWallet,
+      cp.receiverHash,
+      cp.pinCommitment,
+      CONFIG.USDC_POLYGON,
+      cp.principalAmount,
+      cp.amountUGX,
+      cp.locationHash,
+    );
+    await tx.wait();
+
+    // 4. Store in local history
+    const record = {
+      transferId: data.transferId,
+      pin: data.pin,
+      amountUGX: state.draft.amountUGX,
+      agent: state.selectedAgent.name,
+      location: state.draft.locationDescription,
+      expiry: data.expiry,
+      status: 'ESCROWED',
+      txHash: tx.hash,
+      createdAt: Date.now(),
+    };
+    state.history.unshift(record);
+    localStorage.setItem('hawala_history', JSON.stringify(state.history));
+    state.transfer = record;
+
+    state.sendStep = 4;
+    render();
+  } catch (e) {
+    console.error(e);
+    btn.innerHTML = 'Approve & Lock USDC';
+    btn.disabled = false;
+
+    // Demo mode — skip on-chain for MVP preview
+    if (e.message.includes('API') || e.message.includes('fetch')) {
+      activateDemoMode();
+    } else {
+      showBanner('Transaction failed: ' + e.message, 'error');
+    }
+  }
+}
+
+function activateDemoMode() {
+  // Simulate a successful transfer for demo/testing
+  const pin = String(Math.floor(100000 + Math.random() * 900000));
+  const transferId = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map(b => b.toString(16).padStart(2,'0')).join('');
+  const record = {
+    transferId,
+    pin,
+    amountUGX: state.draft?.amountUGX || 300000,
+    agent: state.selectedAgent?.name || 'Demo Agent',
+    location: state.draft?.locationDescription || 'Owino Market',
+    expiry: Math.floor(Date.now()/1000) + 86400,
+    status: 'ESCROWED',
+    txHash: null,
+    createdAt: Date.now(),
+    demo: true,
+  };
+  state.history.unshift(record);
+  localStorage.setItem('hawala_history', JSON.stringify(state.history));
+  state.transfer = record;
+  state.sendStep = 4;
+  render();
+}
+
+function renderSendStep4() {
+  const t   = state.transfer;
+  const pin = t.pin;
+  const expiry = new Date(t.expiry * 1000).toLocaleString();
+
+  // Generate QR
+  setTimeout(() => {
+    const qrContainer = document.getElementById('qr-canvas');
+    if (qrContainer && window.QRCode) {
+      qrContainer.innerHTML = '';
+      new QRCode(qrContainer, {
+        text: JSON.stringify({
+          id: t.transferId?.slice(0, 18),
+          pin,
+          exp: t.expiry,
+          loc: t.location,
+        }),
+        width: 160, height: 160,
+        colorDark: '#0a1628', colorLight: '#f7f0e3',
+      });
+    }
+  }, 100);
+
+  return `
+    <div class="card">
+      <div class="status-banner success">
+        ✅ Funds locked in escrow${t.demo ? ' (Demo Mode)' : ''}
+      </div>
+
+      <div class="card-title">Share with Receiver</div>
+
+      <div class="qr-wrap">
+        <div id="qr-canvas"></div>
+        <div class="qr-label">Scan or share PIN verbally</div>
+      </div>
+
+      <div style="text-align:center;margin:8px 0 16px">
+        <div style="font-size:11px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">
+          6-Digit Redemption PIN
+        </div>
+        <div class="pin-display">
+          ${pin.split('').map(d => `<div class="pin-digit">${d}</div>`).join('')}
+        </div>
+        <div style="font-size:11px;color:var(--text-dim)">Expires: ${expiry}</div>
+      </div>
+
+      <div class="divider"><span class="divider-label">Instructions</span></div>
+
+      <div style="font-size:13px;color:var(--text-dim);line-height:2">
+        1. Share this PIN with your receiver (SMS, WhatsApp, or in person)<br>
+        2. Receiver goes to: <strong style="color:var(--text-main)">${t.location}</strong><br>
+        3. Shows PIN to agent <strong style="color:var(--text-main)">${t.agent}</strong><br>
+        4. Agent hands over <strong style="color:var(--gold)">UGX ${t.amountUGX.toLocaleString()}</strong><br>
+        5. You receive confirmation once cash is delivered
+      </div>
+
+      ${t.txHash ? `
+        <div style="margin-top:16px">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Transaction</div>
+          <div class="transfer-id" onclick="copyText('${t.txHash}')" title="Click to copy">
+            ${t.txHash}
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="display:flex;gap:10px;margin-top:20px">
+        <button class="btn btn-ghost" onclick="copyPin('${pin}')">📋 Copy PIN</button>
+        <button class="btn btn-primary" onclick="newTransfer()">New Transfer</button>
+      </div>
+    </div>
+  `;
+}
+
+function copyPin(pin) {
+  navigator.clipboard?.writeText(pin).then(() => showBanner('PIN copied to clipboard', 'success'));
+}
+
+function copyText(text) {
+  navigator.clipboard?.writeText(text).then(() => showBanner('Copied!', 'success'));
+}
+
+function newTransfer() {
+  state.sendStep = 1;
+  state.draft = null;
+  state.transfer = null;
+  state.selectedAgent = null;
+  render();
+}
+
+// ─── Receive Flow ─────────────────────────────────────────────────────────────
+
+function renderReceive() {
+  return `
+    <div class="card">
+      <div class="card-title">Check Transfer Status</div>
+
+      <div class="status-banner info">
+        📱 If you received an SMS PIN, go to your agent's location and show the PIN.
+        Or look up your transfer below.
+      </div>
+
+      <div class="field">
+        <label>Transfer ID (optional)</label>
+        <input type="text" id="lookupId" placeholder="0xabc123..." />
+        <div class="field-hint">Paste the transfer ID shared by sender</div>
+      </div>
+
+      <button class="btn btn-primary" onclick="lookupTransfer()">Look Up Transfer</button>
+
+      <div id="lookup-result" style="margin-top:16px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">How to Collect Cash</div>
+      <div style="font-size:13px;color:var(--text-dim);line-height:2.2;counter-reset:steps">
+        <div>🔔 You received a PIN via SMS or from sender</div>
+        <div>📍 Go to the agent's location in your area</div>
+        <div>🔑 Show the 6-digit PIN to the agent</div>
+        <div>💵 Agent gives you the exact UGX amount</div>
+        <div>✅ Confirm receipt (tap or reply YES to SMS)</div>
+      </div>
+    </div>
+  `;
+}
+
+async function lookupTransfer() {
+  const id = document.getElementById('lookupId').value.trim();
+  if (!id) return showBanner('Enter a transfer ID', 'error');
+
+  const el = document.getElementById('lookup-result');
+  el.innerHTML = '<div class="pulse" style="color:var(--text-dim);font-size:13px">Looking up…</div>';
+
+  try {
+    const resp = await fetch(`${CONFIG.API_BASE}/transfers/status?id=${encodeURIComponent(id)}`);
+    if (!resp.ok) { el.innerHTML = '<div class="status-banner error">Transfer not found</div>'; return; }
+
+    const t = await resp.json();
+    const expiry = new Date(t.expiry * 1000).toLocaleString();
+
+    el.innerHTML = `
+      <div class="receipt">
+        <div class="receipt-header">
+          <h3>TRANSFER FOUND</h3>
+          <span style="font-size:11px;color:rgba(10,22,40,0.7)">${t.status}</span>
+        </div>
+        <div class="receipt-body">
+          <div class="receipt-row"><span>Amount</span><span>UGX ${(t.amountUGX||0).toLocaleString()}</span></div>
+          <div class="receipt-row"><span>Location</span><span>${t.locationDescription}</span></div>
+          <div class="receipt-row"><span>Expires</span><span>${expiry}</span></div>
+          <div class="receipt-row"><span>Status</span><span>${t.status}</span></div>
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="status-banner error">Error: ${e.message}</div>`;
+  }
+}
+
+// ─── Agent Dashboard ──────────────────────────────────────────────────────────
+
+function renderAgent() {
+  return `
+    <div class="card">
+      <div class="card-title">Agent Dashboard</div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Reputation</div>
+          <div class="stat-value">94%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Today's Volume</div>
+          <div class="stat-value">850K</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Deliveries</div>
+          <div class="stat-value">47</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Collateral</div>
+          <div class="stat-value">$150</div>
+        </div>
+      </div>
+
+      <div class="status-banner success">✅ Active · Verified Agent</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Verify PIN & Release Cash</div>
+
+      <div class="field">
+        <label>Transfer ID</label>
+        <input type="text" id="agent-transfer-id" placeholder="0xabc123…" />
+      </div>
+
+      <div class="field">
+        <label>Enter 6-Digit PIN from Receiver</label>
+        <div class="pin-input-wrap" id="pin-inputs">
+          ${[0,1,2,3,4,5].map(i => `
+            <input type="tel" maxlength="1" id="pin-d${i}"
+              oninput="pinInput(${i}, event)"
+              onkeydown="pinKeydown(${i}, event)"
+              pattern="[0-9]" inputmode="numeric" />
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Proof of Delivery</label>
+        <select id="proof-type">
+          <option value="0">Receiver tapped confirm on my device</option>
+          <option value="1">Receiver replied YES via SMS</option>
+          <option value="2">Photo + geotag (recommended)</option>
+        </select>
+      </div>
+
+      <button class="btn btn-primary" onclick="agentConfirm()" id="agent-confirm-btn">
+        Verify & Release Cash
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Open Dispute</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:12px">
+        If receiver claims non-delivery or you suspect fraud, open a dispute.
+        3 community arbiters will review within 24 hours.
+      </div>
+      <div class="field">
+        <label>Transfer ID</label>
+        <input type="text" id="dispute-id" placeholder="0xabc123…" />
+      </div>
+      <div class="field">
+        <label>Reason</label>
+        <input type="text" id="dispute-reason" placeholder="Receiver did not show up" />
+      </div>
+      <button class="btn btn-danger" onclick="openDispute()">Flag Dispute</button>
+    </div>
+
+    <div class="notice">
+      Agent collateral ($50 min USDC) is held in escrow and may be partially slashed
+      if a dispute is resolved against you. Maintain high delivery standards to protect
+      your reputation score and daily limits.
+    </div>
+  `;
+}
+
+function pinInput(idx, e) {
+  const val = e.target.value.replace(/\D/g, '');
+  e.target.value = val.slice(-1);
+  if (val && idx < 5) {
+    document.getElementById(`pin-d${idx + 1}`)?.focus();
+  }
+}
+
+function pinKeydown(idx, e) {
+  if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+    document.getElementById(`pin-d${idx - 1}`)?.focus();
+  }
+}
+
+function getPinValue() {
+  return [0,1,2,3,4,5].map(i => document.getElementById(`pin-d${i}`)?.value || '').join('');
+}
+
+async function agentConfirm() {
+  const transferId = document.getElementById('agent-transfer-id')?.value.trim();
+  const pin = getPinValue();
+  const proofType = parseInt(document.getElementById('proof-type')?.value || '0');
+
+  if (!transferId) return showBanner('Enter a transfer ID', 'error');
+  if (pin.length !== 6) return showBanner('Enter the full 6-digit PIN', 'error');
+
+  const btn = document.getElementById('agent-confirm-btn');
+  btn.innerHTML = '<span class="spinner"></span> Verifying…';
+  btn.disabled = true;
+
+  try {
+    const resp = await fetch(`${CONFIG.API_BASE}/transfers/confirm-delivery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transferId,
+        agentWallet: state.wallet || '0x0',
+        pin,
+        proofType,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'Verification failed');
+    }
+
+    const data = await resp.json();
+
+    // If wallet connected, submit on-chain
+    if (state.wallet && state.signer) {
+      btn.innerHTML = '<span class="spinner"></span> Submitting on-chain…';
+      const escrow = new ethers.Contract(CONFIG.ESCROW_ADDRESS, ESCROW_ABI, state.signer);
+      const cp = data.contractParams;
+      const tx = await escrow.confirmDelivery(cp.transferId, cp.pin, cp.proofType, cp.proofData);
+      await tx.wait();
+      showBanner('✅ Delivery confirmed! USDC released to your wallet.', 'success');
+    } else {
+      showBanner('✅ PIN verified. Connect wallet to release on-chain funds.', 'success');
+    }
+
+    btn.innerHTML = 'Verify & Release Cash';
+    btn.disabled = false;
+  } catch (e) {
+    btn.innerHTML = 'Verify & Release Cash';
+    btn.disabled = false;
+    showBanner('Error: ' + e.message, 'error');
+  }
+}
+
+async function openDispute() {
+  const id = document.getElementById('dispute-id')?.value.trim();
+  const reason = document.getElementById('dispute-reason')?.value.trim();
+  if (!id || !reason) return showBanner('Fill in transfer ID and reason', 'error');
+  if (!state.wallet) return showBanner('Connect wallet first', 'error');
+
+  try {
+    const resp = await fetch(`${CONFIG.API_BASE}/transfers/dispute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transferId: id, initiatorWallet: state.wallet, reason }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showBanner('Dispute opened. Arbiters notified via Telegram/SMS.', 'success');
+    } else {
+      showBanner(data.error || 'Dispute failed', 'error');
+    }
+  } catch (e) {
+    showBanner('Error: ' + e.message, 'error');
+  }
+}
+
+// ─── History ──────────────────────────────────────────────────────────────────
+
+function renderHistory() {
+  if (!state.history.length) {
+    return `
+      <div class="card" style="text-align:center;padding:40px 20px">
+        <div style="font-size:32px;margin-bottom:12px">📋</div>
+        <div style="color:var(--text-dim)">No transfers yet.<br>Send your first transfer to get started.</div>
+      </div>
+    `;
+  }
+
+  const items = state.history.map(t => {
+    const date = new Date(t.createdAt).toLocaleDateString();
+    const statusColor = {
+      ESCROWED: 'var(--ochre)', DELIVERED: 'var(--green)',
+      DISPUTED: 'var(--red)', REFUNDED: 'var(--text-dim)',
+    }[t.status] || 'var(--text-dim)';
+
+    return `
+      <div class="receipt" style="margin-bottom:12px">
+        <div class="receipt-header" style="background:var(--navy-light)">
+          <h3 style="color:var(--ochre-glow)">${t.agent || 'Unknown Agent'}</h3>
+          <span style="font-size:11px;color:${statusColor};font-weight:700">${t.status}</span>
+        </div>
+        <div class="receipt-body">
+          <div class="receipt-row">
+            <span>Amount</span><span>UGX ${(t.amountUGX||0).toLocaleString()}</span>
+          </div>
+          <div class="receipt-row">
+            <span>Location</span><span>${t.location}</span>
+          </div>
+          <div class="receipt-row">
+            <span>Date</span><span>${date}</span>
+          </div>
+          ${t.pin && t.status === 'ESCROWED' ? `
+            <div class="receipt-row">
+              <span>PIN</span>
+              <span style="font-family:var(--ff-mono);letter-spacing:0.15em;color:var(--gold)">${t.pin}</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-family:var(--ff-mono);font-size:12px;color:var(--text-dim)">${state.history.length} TRANSFER(S)</div>
+      <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:11px"
+        onclick="clearHistory()">Clear</button>
+    </div>
+    ${items}
+  `;
+}
+
+function clearHistory() {
+  if (!confirm('Clear local history? On-chain records persist.')) return;
+  state.history = [];
+  localStorage.removeItem('hawala_history');
+  render();
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+let bannerTimeout;
+function showBanner(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `status-banner ${type}`;
+  el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:999;max-width:360px;width:90%;box-shadow:var(--shadow)';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => el.remove(), 3000);
+}
+
+function attachSendHandlers() {}
+function attachReceiveHandlers() {}
+function attachAgentHandlers() {}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+render();
+
+// PWA install prompt
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+});
+
+// Auto-reconnect wallet if previously connected
+if (window.ethereum) {
+  window.ethereum.request({ method: 'eth_accounts' }).then(accounts => {
+    if (accounts.length) connectWallet();
+  });
+}
+</script>
+</body>
+</html>
